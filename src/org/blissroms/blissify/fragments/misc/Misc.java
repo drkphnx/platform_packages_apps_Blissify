@@ -40,23 +40,38 @@ import com.android.settings.SettingsPreferenceFragment;
 import com.android.settings.Utils;
 import com.android.settings.search.BaseSearchIndexProvider;
 import com.android.settingslib.search.SearchIndexable;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Handler;
+import android.util.Log;
+import android.app.Activity;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import org.blissroms.blissify.fragments.misc.SmartPixels;
 
+import org.json.JSONObject;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+
 @SearchIndexable(forTarget = SearchIndexable.ALL & ~SearchIndexable.ARC)
 public class Misc extends SettingsPreferenceFragment implements
         Preference.OnPreferenceChangeListener {
 
+    private static final String TAG = "MiscFragment";
     private static final String SMART_PIXELS = "smart_pixels";
-
     private Preference mSmartPixels;
+
+    private static final String KEY_PIF_JSON_FILE_PREFERENCE = "pif_json_file_preference";
+    private Preference mPifJsonFilePreference;
+    private Handler mHandler;
 
     @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
+        mHandler = new Handler();
         addPreferencesFromResource(R.xml.blissify_misc);
         final PreferenceScreen prefSet = getPreferenceScreen();
         mSmartPixels = (Preference) findPreference(SMART_PIXELS);
@@ -64,11 +79,46 @@ public class Misc extends SettingsPreferenceFragment implements
               com.android.internal.R.bool.config_supportSmartPixels);
         if (!mSmartPixelsSupported)
               prefSet.removePreference(mSmartPixels);
+        mPifJsonFilePreference = findPreference(KEY_PIF_JSON_FILE_PREFERENCE);
     }
 
     @Override
     public int getMetricsCategory() {
         return MetricsEvent.BLISSIFY;
+    }
+
+    @Override
+    public boolean onPreferenceTreeClick(Preference preference) {
+        if (preference == mPifJsonFilePreference) {
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("application/json");
+            startActivityForResult(intent, 10001);
+            return true;
+        }
+        return super.onPreferenceTreeClick(preference);
+    }
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 10001 && resultCode == Activity.RESULT_OK) {
+            Uri uri = data.getData();
+            Log.d(TAG, "URI received: " + uri.toString());
+            try (InputStream inputStream = getActivity().getContentResolver().openInputStream(uri)) {
+                if (inputStream != null) {
+                    String json = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+                    Log.d(TAG, "JSON data: " + json);
+                    JSONObject jsonObject = new JSONObject(json);
+                    for (Iterator<String> it = jsonObject.keys(); it.hasNext(); ) {
+                        String key = it.next();
+                        String value = jsonObject.getString(key);
+                        Log.d(TAG, "Setting property: persist.sys.pihooks_" + key + " = " + value);
+                        SystemProperties.set("persist.sys.pihooks_" + key, value);
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error reading JSON or setting properties", e);
+            }
+        }
     }
 
     @Override
